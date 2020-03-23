@@ -1,19 +1,32 @@
 import os
 import math
 import chardet
+import json
 from pathlib import Path
 
-# paths
+config = Path.cwd() / 'config.ini'
+f = open(config, 'rt', encoding="UTF-8")
+for i in f.readlines():
+    if i.split(":")[0] == "project":
+        project = i.split(":")[1]
+    
+os.chdir("..")
 userscorepath = Path.cwd() / 'score'
 usersongpath = Path.cwd() / 'songs'
+os.chdir(project)
+
 userscorepath_username = userscorepath
 
-# lists
+
 scorepathlist = [] # path type
 songpathlist = []
 datalist = []
-
 toplist = []
+
+datadict = []
+
+legacyplaycount = 0
+
 
 def refresh():
     del scorepathlist[:] 
@@ -21,19 +34,18 @@ def refresh():
     del datalist[:]
     del toplist[:]
 
-
 # input songpathlist
-def UPDATE__songpath(_filepath): # init with usersongpath
+def UPDATEsongpath(_filepath): # init with usersongpath
     for p in Path(_filepath).iterdir():
         if p.is_file():
             ext = (str(p)).split('.')[-1]
             if ext == ('ksh'):
                 songpathlist.append(p)
         else:
-            UPDATE__songpath(p)
+            UPDATEsongpath(p)
 
 # generate scorepathlist using songpathlist (discards unexisting or removed songs)
-def UPDATE__scorepath(_filepath): # init with userscorepath
+def UPDATEscorepath(_filepath): # init with userscorepath
     for p in Path(_filepath).iterdir():
         if p.is_dir(): # get username
             userscorepath_username = p # ./score/username/
@@ -46,9 +58,9 @@ def UPDATE__scorepath(_filepath): # init with userscorepath
         scorepathlist.append(Path(temp))
         
 # ignore songpath without score
-def UPDATE__path():
-    UPDATE__songpath(usersongpath)
-    UPDATE__scorepath(userscorepath)
+def UPDATEpath():
+    UPDATEsongpath(usersongpath)
+    UPDATEscorepath(userscorepath)
     
     count = 0
     unexistingindex = []
@@ -64,15 +76,14 @@ def UPDATE__path():
         count += 1
 
 # generate data
-
-def UPDATE__data():
-    # [rate, score, grade, force, title, artist, effect, difficulty, level]
+def UPDATEdata():
+    # [rate, score, grade, force, title, artist, effect, difficulty, level, playcount]
     # --------------------------^ 
     
     i = -1
     while i < len(scorepathlist) - 1:
         i += 1
-        data = ["failed", 0, "D", 0, "title", "artist", "effector", "difficulty", 0]
+        data = ["failed", 0, "D", 0, "title", "artist", "effector", "difficulty", 0, 0]
         
         # scorepath
         f = open(Path(scorepathlist[i]), 'rt', encoding="UTF-8")
@@ -83,10 +94,11 @@ def UPDATE__data():
             tempdata[0] = rate(line)
             tempdata[1] = int(line.split("=")[1].split(",")[0])
             
-            scoredata = list(updatebestscore(line, scoredata, tempdata))
+            scoredata = list(UPDATEbestscore(line, scoredata, tempdata))
         data[0] = str(scoredata[0])
         data[1] = int(scoredata[1])
         data[2] = getgrade(data[1])
+        data[9] = int(line.split(",")[10])
         f.close()
         
         
@@ -118,7 +130,6 @@ def UPDATE__data():
         
         datalist.append(data)
                 
-
 def rate(line): # pass a line
     divl = line.split("=")[0].split(",")
     divr = line.split("=")[1].split(",")
@@ -131,7 +142,7 @@ def rate(line): # pass a line
             return divl[0] # normal hard
     return "failed"
 
-def updatebestscore(line, orig, temp):
+def UPDATEbestscore(line, orig, temp):
     ret = [orig[0], orig[1], "D", 0]
     
     # rate
@@ -238,6 +249,13 @@ def getencoding(path): # path
     else:
         return "SHIFT_JIS"
 
+# 
+def CALC__playcount():
+    fc = 0
+    for i in datalist:
+        fc += int(i[9])
+    return fc
+
 # SDVX V-ish force
 def CALC__sdvx_v():
     for data in datalist:
@@ -252,7 +270,75 @@ def CALC__sdvx_v():
     toplist.sort(key=lambda x: x[3])
     toplist.reverse()
 
+
+print("successfully initialized")
+print("scanning data...")
 refresh()
-UPDATE__path()
-UPDATE__data()
+UPDATEpath()
+UPDATEdata()
+CALC__playcount()
 CALC__sdvx_v()
+
+
+##############################
+##CALCULATE LEGACY PLAYCOUNT##
+##############################
+
+PC__spathlist = [] 
+PC__pclist = []
+
+# input *.ksc -> sfilelist
+def PC__UPDATEspathlist(sfp):
+    for p in Path(sfp).iterdir():
+        if p.is_file(): 
+            ext = (str(p)).split('.')[-1]
+            if ext == ('ksc'):
+                PC__spathlist.append(p)
+        else:
+            PC__UPDATEspathlist(p)
+
+# input *.ksc Data -> PC__pclist
+def PC__UPDATEpclist():
+    """Rate, MirrorRandom, ?, BT, FX, LASER=Score, ?, ?, Gauge, ?, Playcount, Clearcount, UC, PUC"""
+    for p in PC__spathlist:
+        f = open(p, "r")
+        for i in f.readlines():
+            playcount = int(i.split(',')[10])
+            PC__pclist.append(playcount)
+    f.close()
+
+# calculate the result (full playcount)
+def PC__CALC():
+    fc = 0
+    for i in PC__pclist:
+        fc += int(i)
+    return fc
+
+# output playcount
+
+PC__UPDATEspathlist(userscorepath)
+PC__UPDATEpclist()
+legacyplaycount = PC__CALC()
+
+
+print("done.")
+
+print("creating data.json...")
+# outputs
+def outputjson(data):
+    sdvxvf = []
+    for i in data:
+        temp = dict(title=i[4], level=i[8], rate=i[0],
+                     grade=i[2], score=i[1], force=i[3],
+                     artist=i[5], effector=i[6], difficulty=i[7],
+                     playcount=i[9])
+        sdvxvf.append(temp)
+    info = dict(vf_sdvx_v=sdvxvf, playcount=CALC__playcount(), legacyplaycount=legacyplaycount)
+    output = dict(payload=info)
+    with open("data.json", "w") as f:
+        json.dump(output, f)
+        
+outputjson(datalist)
+print("done.")
+print("* Success *")
+os.system("Pause")
